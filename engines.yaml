@@ -1,0 +1,663 @@
+# engines.yaml — 多元搜索渠道注册表（机器可读单一事实源）
+# ============================================================
+# 三件套之二。配套文件：
+#   方法论手册: Multi-Search-Engine_v3.1.0.md（唯一入口，Agent 只需读它）
+#   状态刷新器: selftest.py（双击 selftest.bat 运行，探活后把 status_cn_direct 写回本文件）
+#
+# 字段说明：
+#   id              引擎唯一标识（手册 ② 路由表按 id 引用）
+#   group           cn=国内 / intl=国际 / academic=学术 / endpoint=特化端点 / community=社区信号 / semantic=神经语义搜索（MCP 通道） / browser=浏览器自动化（CLI 通道）
+#   executor        执行器（v3.0.0 新增）: web_fetch（默认，可省略）| browser_act（经 browser-act CLI，JS渲染/登录态/验证码/交互页专用，见 browser_act 条目）
+#   url             查询 URL 模板，{q} 为查询词占位
+#   probe           探活 URL（selftest.py 用，固定查询词）
+#   ok_marker       响应体包含此子串 = 真实出结果（区分 JS 壳页/反爬页，HTTP 200 不可信）
+#   bad_marker      响应体包含此子串 = 壳页/反爬（优先级高于 ok_marker）
+#   status_proxy    能出墙出口实测状态（人工维护，selftest 不覆盖）
+#   status_cn_direct 大陆直连实测状态（selftest.py 自动写回，手改会被覆盖）
+#   状态值: ok=真实出结果 | shell=通但0结果(JS壳) | blocked=反爬/403 | timeout=超时 | geo=地域封锁 | js_render=需JS渲染 | untested
+#   manual          true = selftest 只探测报告、不写回状态（此类引擎对 urllib 裸客户端返反爬页，
+#                   但 web_fetch/curl 完整请求头可用，以人工/Agent 实测为准，防探活误伤）
+#   fallback        降级目标引擎 id（❌/⚠️ 时必走）
+#   intents         适用意图: default_zh/default_en/tech/academic/news/wechat/community/fact/restricted_fallback
+#   langs          渠道支持的查询语言 TOP3（按优先级排序，实测优先；支持就用原文，不支持才翻译，见手册 ⑤.5 跨语言适配）：
+#                   zh 中文 / en 英文 / ko 韩语 / ja 日语 / ru 俄语 / de 德语 / fr 法语 / es 西语 / any 任意语言原词直投
+#   notes           人读备注（限流特征/解析提示/坑）
+# ============================================================
+
+meta:
+  version: "3.1.0"
+  last_probe: "2026-09-05"
+  probe_egress: "大陆直连（选择性过滤出口）"
+
+engines:
+  # ---------- 国内引擎（7） ----------
+  - id: baidu
+    name: 百度
+    group: cn
+    url: "https://www.baidu.com/s?wd={q}"
+    probe: "https://www.baidu.com/s?wd=python"
+    ok_marker: "result"
+    bad_marker: "安全验证"
+    manual: true
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: sogou
+    intents: [default_zh, news, fact]
+    langs: [zh, en]
+    notes: "中文索引最全；高频/连续请求触发「百度安全验证」反爬页，间隔>2s 恢复；selftest 若标 shell 多为探活误伤，浏览器确认后可手动改回"
+
+  - id: bing_cn
+    name: 必应中国
+    group: cn
+    url: "https://cn.bing.com/search?q={q}&ensearch=0"
+    probe: "https://cn.bing.com/search?q=python&ensearch=0"
+    ok_marker: "b_algo"
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: baidu
+    intents: [default_zh, fact]
+    langs: [zh, en]
+    notes: "结果块 class=b_algo，可数条数判真实性"
+
+  - id: bing_intl
+    name: 必应国际
+    group: cn
+    url: "https://cn.bing.com/search?q={q}&ensearch=1"
+    probe: "https://cn.bing.com/search?q=python&ensearch=1"
+    ok_marker: "b_algo"
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: ecosia
+    intents: [default_en, tech, restricted_fallback]
+    langs: [en, zh]
+    notes: "中国服务器出英文结果；直连环境英文首选主力"
+
+  - id: so360
+    name: 360 搜索
+    group: cn
+    url: "https://www.so.com/s?q={q}"
+    probe: "https://www.so.com/s?q=python"
+    ok_marker: "res-list"
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: baidu
+    intents: [default_zh]
+    langs: [zh, en]
+    notes: ""
+
+  - id: sogou
+    name: 搜狗
+    group: cn
+    url: "https://sogou.com/web?query={q}"
+    probe: "https://sogou.com/web?query=python"
+    ok_marker: "results"
+    status_proxy: ok
+    status_cn_direct: shell
+    fallback: baidu
+    intents: [default_zh]
+    langs: [zh, en]
+    notes: "知乎内容优化好；知乎定向 site:zhihu.com 走此引擎"
+
+  - id: weixin
+    name: 微信搜索（搜狗）
+    group: cn
+    url: "https://wx.sogou.com/weixin?type=2&query={q}"
+    probe: "https://wx.sogou.com/weixin?type=2&query=python"
+    ok_marker: "news-list"
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: null
+    intents: [wechat]
+    langs: [zh]
+    notes: "唯一公众号搜索渠道，无降级；type=2 搜文章 / type=1 搜认证号（索引有限）；weixinmoni 端点是死链勿用。【配套 CLI 工具（v3.1.0 收编）】tools/wx_adapter（tanzi 适配器，MIT，上游 wx-search-cli 0.1.0）：首用 `npm ci --ignore-scripts`，`node cli.mjs search \"主题\" --limit N` 出标题/账号/日期/real_url+coverage，`node cli.mjs read <real_url>` 取全文；2026-10-07 实测搜索+解析+正文全链路通（11 项离线回归全过），命中偏 2018-2022 存量——适合挖存量深度长文，不适合当日舆情；安全面：只出搜狗/微信双域、cookie 仅内存、剥离凭证参数、风控即停"
+
+  - id: sm
+    name: 神马搜索
+    group: cn
+    url: "https://m.sm.cn/s?q={q}"
+    probe: "https://m.sm.cn/s?q=python"
+    ok_marker: "result"
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: baidu
+    intents: [default_zh]
+    langs: [zh, en]
+    notes: "移动端优化"
+
+  # ---------- 国际引擎（15） ----------
+  - id: google
+    name: Google 主站
+    group: intl
+    url: "https://www.google.com/search?q={q}"
+    probe: "https://www.google.com/search?q=python"
+    ok_marker: "id=\"search\""
+    bad_marker: "Please click here if you are not redirected"
+    status_proxy: shell
+    status_cn_direct: timeout
+    fallback: bing_intl
+    intents: [default_en, tech]
+    langs: [en, zh, ja]
+    notes: "裸 fetch 返 JS 重定向壳/consent 墙，HTTP 200 但 0 结果；需 cookie/JS 处理，零配置勿作首选"
+
+  - id: google_hk
+    name: Google 香港
+    group: intl
+    url: "https://www.google.com.hk/search?q={q}"
+    probe: "https://www.google.com.hk/search?q=python"
+    ok_marker: "id=\"search\""
+    bad_marker: "Please click here if you are not redirected"
+    status_proxy: shell
+    status_cn_direct: timeout
+    fallback: bing_intl
+    intents: [default_en]
+    langs: [zh, en]
+    notes: "同 google，裸 fetch 返壳页（2026-08-13 实测）；时间过滤 tbs=qdr:w 等参数见手册 ⑤"
+
+  - id: ddg
+    name: DuckDuckGo
+    group: intl
+    url: "https://duckduckgo.com/html/?q={q}"
+    probe: "https://duckduckgo.com/html/?q=python"
+    ok_marker: "result__body"
+    status_proxy: ok
+    status_cn_direct: timeout
+    fallback: brave
+    intents: [default_en, tech]
+    langs: [en, zh, de]
+    notes: "大陆直连被屏蔽（GreatFire 确认）；Bangs 快捷 !gh/!so/!w 见手册 ⑤；脚本高频易触发限流"
+
+  - id: yahoo
+    name: Yahoo
+    group: intl
+    url: "https://search.yahoo.com/search?p={q}"
+    probe: "https://search.yahoo.com/search?p=python"
+    ok_marker: "algo"
+    status_proxy: ok
+    status_cn_direct: timeout
+    fallback: ddg
+    intents: [default_en]
+    langs: [en, ja, zh]
+    notes: ""
+
+  - id: startpage
+    name: Startpage
+    group: intl
+    url: "https://www.startpage.com/sp/search?query={q}"
+    probe: "https://www.startpage.com/sp/search?query=python"
+    ok_marker: "result"
+    status_proxy: ok
+    status_cn_direct: timeout
+    fallback: ddg
+    intents: [default_en]
+    langs: [en, de, zh]
+    notes: "Google 结果+隐私；time=day/week/month/year 时间过滤"
+
+  - id: brave
+    name: Brave Search
+    group: intl
+    url: "https://search.brave.com/search?q={q}"
+    probe: "https://search.brave.com/search?q=python"
+    ok_marker: "snippet"
+    status_proxy: ok
+    status_cn_direct: timeout
+    fallback: ddg
+    intents: [default_en]
+    langs: [en, zh, es]
+    notes: "独立索引；tf=pw/pm/py 时间过滤；source=news 已收费勿用"
+
+  - id: ecosia
+    name: Ecosia
+    group: intl
+    url: "https://www.ecosia.org/search?q={q}"
+    probe: "https://www.ecosia.org/search?q=python"
+    ok_marker: "result"
+    status_proxy: ok
+    status_cn_direct: shell
+    fallback: bing_intl
+    intents: [default_en]
+    langs: [en, de, fr]
+    notes: "Bing 系索引；⚠️ 直连已 301 重定向到必应主页拿不到结果（2026-08-13 午间复测，早间尚可用，状态漂移快）；直连英文改用 bing_intl"
+
+  - id: qwant
+    name: Qwant
+    group: intl
+    url: "https://www.qwant.com/?q={q}"
+    probe: "https://www.qwant.com/?q=python"
+    ok_marker: "result"
+    status_proxy: geo
+    status_cn_direct: timeout
+    fallback: ddg
+    intents: []
+    langs: [fr, en, de]
+    notes: "中国大陆 geo-block，需 EU 出口才可用；默认剔除出路由"
+
+  - id: wolfram
+    name: WolframAlpha
+    group: intl
+    url: "https://www.wolframalpha.com/input?i={q}"
+    probe: "https://www.wolframalpha.com/input?i=100+USD+to+CNY"
+    ok_marker: ""
+    status_proxy: js_render
+    status_cn_direct: untested
+    fallback: null
+    intents: [fact]
+    langs: [en, zh, ja]
+    notes: "知识计算（数学/单位/货币/股票）；web_fetch 抓不到结果，走官方 API 或 web_url_read"
+
+  - id: yandex
+    name: Yandex（俄系 SERP）
+    group: intl
+    url: "https://yandex.com/search/?text={q}"
+    probe: "https://yandex.com/search/?text=python"
+    ok_marker: "found"
+    bad_marker: "captcha"
+    status_proxy: ok
+    status_cn_direct: shell
+    fallback: bing_intl
+    intents: [default_en, restricted_fallback]
+    langs: [zh, en, ru]
+    notes: "俄系 SERP，中文索引可用（2026-08-15/16 多次实测直连通过）；直连相对稳定，>30次/分限流 + 部分中国 IP 段可能触发动态拦截；中文回声搜索可用（对国内内容平台索引有覆盖）；作 restricted_fallback_en 补充出口 + 回声搜索渠道"
+
+  - id: naver
+    name: Naver（韩系第一）
+    group: intl
+    url: "https://search.naver.com/search.naver?query={q}"
+    probe: "https://search.naver.com/search.naver?query=python+tutorial"
+    ok_marker: "search_result"
+    bad_marker: "captcha"
+    status_proxy: ok
+    status_cn_direct: shell
+    fallback: bing_intl
+    intents: [default_en, restricted_fallback]
+    langs: [ko, en]
+    notes: "韩系市场第一 SERP（2026-08-15 直连实测通过：英文检索真实结果无验证码）；UI 韩语、结果以韩语+英语混合，韩系/东亚内容独家；中文检索以韩语内容为主，价值在英文+韩系深度内容；直连稳定度待本机 selftest"
+
+  - id: mojeek
+    name: Mojeek（英国独立索引）
+    group: intl
+    url: "https://www.mojeek.com/search?q={q}"
+    probe: "https://www.mojeek.com/search?q=python+tutorial"
+    ok_marker: "results"
+    bad_marker: "No pages found"
+    status_proxy: ok
+    status_cn_direct: blocked
+    fallback: bing_intl
+    intents: [default_en, restricted_fallback]
+    langs: [en]
+    notes: "英国独立爬虫索引（2026-08-15 直连实测通过：英文检索质量高，docs.python/GfG/TutorialsPoint）；**中文查询明确拒绝**（'doesn't currently search pages in this language'，bad_marker 可识别），不会静默给空结果——英文专用渠道；无反爬对 Agent 友好"
+
+  - id: yahoo_jp
+    name: Yahoo Japan（日系）
+    group: intl
+    url: "https://search.yahoo.co.jp/search?p={q}"
+    probe: "https://search.yahoo.co.jp/search?p=python+tutorial"
+    ok_marker: "search-result"
+    bad_marker: "captcha"
+    status_proxy: ok
+    status_cn_direct: timeout
+    fallback: bing_intl
+    intents: [default_en, restricted_fallback]
+    langs: [ja, en]
+    notes: "日系市场 SERP（2026-08-15 直连实测通过：英文检索真实结果无验证码，英语为主+日语界面）；日系/东亚内容补充；直连稳定度待本机 selftest"
+
+  - id: marginalia
+    name: Marginalia（反主流独立索引）
+    group: intl
+    url: "https://search.marginalia.nu/search?query={q}"
+    probe: "https://search.marginalia.nu/search?query=python+tutorial"
+    ok_marker: "results"
+    bad_marker: "captcha"
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: bing_intl
+    intents: [default_en, restricted_fallback]
+    langs: [en]
+    notes: "反主流独立索引（2026-08-15 直连实测通过：无验证码，纯独立/小众/复古站点，无商业推广）；专搜被 Google/Bing 忽略的独立小站/技术深内容，与 37 渠道零重叠；英文专用；直连稳定度待本机 selftest"
+
+  - id: seznam
+    name: Seznam（捷克独立索引）
+    group: intl
+    url: "https://search.seznam.cz/?q={q}"
+    probe: "https://search.seznam.cz/?q=python+tutorial"
+    ok_marker: "Sponzorované"
+    bad_marker: "captcha"
+    status_proxy: ok
+    status_cn_direct: shell
+    fallback: bing_intl
+    intents: [default_en, restricted_fallback]
+    langs: [cs, en]
+    notes: "捷克第一搜索引擎，独立爬虫索引（2026-08-15 直连实测通过：真实结果 learnpython/TutorialsPoint/GfG，无验证码，捷克语 UI+国际索引）；中欧/东欧内容独家补充；直连稳定度待本机 selftest"
+
+  # ---------- 特化端点 ----------
+  - id: bing_academic
+    name: 必应学术
+    group: endpoint
+    url: "https://cn.bing.com/academic/search?q={q}"
+    probe: "https://cn.bing.com/academic/search?q=machine+learning"
+    ok_marker: "aca_algo"
+    manual: true
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: openalex
+    intents: [academic, restricted_fallback]
+    langs: [en, zh]
+    notes: "实测 25 条真实论文（curl/web_fetch 完整头可用）；⚠️ 对 urllib 裸客户端返 noresult 壳，selftest 已跳过（manual），以 web_fetch 实测为准"
+
+  - id: google_scholar
+    name: Google Scholar
+    group: endpoint
+    url: "https://scholar.google.com/scholar?q={q}"
+    probe: "https://scholar.google.com/scholar?q=machine+learning"
+    ok_marker: "gs_r"
+    bad_marker: "unusual traffic"
+    status_proxy: blocked
+    status_cn_direct: timeout
+    fallback: bing_academic
+    intents: [academic]
+    langs: [en, zh, ru]
+    notes: "反爬「unusual traffic」拦截，仅出墙出口低频尝试"
+
+  - id: baidu_xueshu
+    name: 百度学术
+    group: endpoint
+    url: "https://xueshu.baidu.com/s?wd={q}"
+    probe: "https://xueshu.baidu.com/s?wd=machine+learning"
+    ok_marker: "sc_content"
+    status_proxy: blocked
+    status_cn_direct: shell
+    fallback: bing_academic
+    intents: []
+    langs: [zh]
+    notes: "❌ 已弃用：HTTP 403 反爬（2026-08-13 实测，由 0 条结果恶化为直接拒绝）"
+
+  - id: google_news_rss
+    name: Google News RSS
+    group: endpoint
+    url: "https://news.google.com/rss/search?q={q}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+    probe: "https://news.google.com/rss/search?q=python&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+    ok_marker: "<item>"
+    status_proxy: ok
+    status_cn_direct: timeout
+    fallback: baidu
+    intents: [news, restricted_fallback]
+    langs: [zh, en]
+    notes: "英文改参数 hl=en-US&gl=US&ceid=US:en；~60 条/查询；替代已失效的 Bing News RSS（format=rss 被忽略返 HTML，弃用）"
+
+  - id: ddg_instant
+    name: DDG Instant Answer
+    group: endpoint
+    url: "https://api.duckduckgo.com/?q={q}&format=json&no_html=1"
+    probe: "https://api.duckduckgo.com/?q=python&format=json&no_html=1"
+    ok_marker: "AbstractText"
+    status_proxy: ok
+    status_cn_direct: timeout
+    fallback: wikipedia_rest
+    intents: [fact]
+    langs: [en]
+    notes: "定义/事实/换算；多词查询常返回空"
+
+  - id: wikipedia_rest
+    name: Wikipedia REST
+    group: endpoint
+    url: "https://en.wikipedia.org/api/rest_v1/page/summary/{q}"
+    probe: "https://en.wikipedia.org/api/rest_v1/page/summary/Python"
+    ok_marker: "extract"
+    status_proxy: ok
+    status_cn_direct: timeout
+    fallback: baidu
+    intents: [fact]
+    langs: [en]
+    notes: "{q} 为词条名非查询词；~1000/天"
+
+  - id: wayback
+    name: Internet Archive Wayback
+    group: endpoint
+    url: "https://archive.org/wayback/available?url={q}"
+    probe: "https://archive.org/wayback/available?url=example.com"
+    ok_marker: "archived_snapshots"
+    status_proxy: ok
+    status_cn_direct: timeout
+    fallback: null
+    intents: [fact]
+    langs: [any]
+    notes: "历史快照/死链还原；替代已下线的 Google cache: 操作符；archive.org 大陆历来不稳"
+
+  # ---------- fact 裸接口（4，2026-09-05 public-apis 交叉评估入池，实测真数据） ----------
+  - id: hko
+    name: 中国香港天文台 OpenData
+    group: endpoint
+    url: "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType={q}&lang=tc"
+    probe: "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=flw&lang=tc"
+    ok_marker: "generalSituation"
+    status_proxy: untested
+    status_cn_direct: ok
+    fallback: baidu
+    intents: [fact]
+    langs: [zh, en]
+    notes: "天气/地震/气候（{q}=dataType: flw 本周天气 / fnd 9天预报 / warn 警告 / flt 高温）；lang=tc 繁体改 en 英文；实测 0.2s 最快（2026-09-05）"
+
+  - id: open_meteo
+    name: Open-Meteo 全球天气
+    group: endpoint
+    url: "https://api.open-meteo.com/v1/forecast?latitude={q}&longitude=114.06&current=temperature_2m,weather_code&timezone=auto"
+    probe: "https://api.open-meteo.com/v1/forecast?latitude=22.54&longitude=114.06&current=temperature_2m,weather_code&timezone=Asia/Shanghai"
+    ok_marker: "temperature_2m"
+    status_proxy: untested
+    status_cn_direct: ok
+    fallback: hko
+    intents: [fact]
+    langs: [any]
+    notes: "全球天气预报免 Key（{q}=纬度，经度默认 114.06 深圳——改坐标直接换 URL 参数）；两轮实测均通过（2026-09-05），全球覆盖"
+
+  - id: frankfurter
+    name: Frankfurter 汇率（欧央行）
+    group: endpoint
+    url: "https://api.frankfurter.app/latest?from=USD&to={q}"
+    probe: "https://api.frankfurter.app/latest?from=USD&to=CNY"
+    ok_marker: "rates"
+    status_proxy: untested
+    status_cn_direct: ok
+    fallback: currency_api
+    intents: [fact]
+    langs: [any]
+    notes: "欧央行汇率 + 时间序列（{q}=目标币种如 CNY；历史区间 /2020-01-01..2026-01-01?from=USD&to=CNY）；实测 2.9s（2026-09-05）"
+
+  - id: currency_api
+    name: Currency-api（fawazahmed0）
+    group: endpoint
+    url: "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/{q}.min.json"
+    probe: "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json"
+    ok_marker: "usd"
+    status_proxy: untested
+    status_cn_direct: ok
+    fallback: baidu
+    intents: [fact]
+    langs: [any]
+    notes: "150+ 币种汇率无限制，CDN 分发（{q}=币种代码如 usd/cny）；frankfurter 降级互补；实测 0.8s（2026-09-05）"
+
+  # ---------- 学术集群（零 Key API） ----------
+  - id: openalex
+    name: OpenAlex
+    group: academic
+    url: "https://api.openalex.org/works?search={q}"
+    probe: "https://api.openalex.org/works?search=machine+learning&per-page=1"
+    ok_marker: "\"results\""
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: crossref
+    intents: [academic, restricted_fallback]
+    langs: [any]
+    notes: "2.5 亿文献 CC0；直连可达（count 百万级正常返回），直连环境学术 API 首选"
+
+  - id: crossref
+    name: Crossref
+    group: academic
+    url: "https://api.crossref.org/works?query={q}"
+    probe: "https://api.crossref.org/works?query=machine+learning&rows=1"
+    ok_marker: "\"message\""
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: openalex
+    intents: [academic]
+    langs: [any]
+    notes: "1.5 亿 DOI backbone；加 &mailto= 提权限流额度"
+
+  - id: semantic_scholar
+    name: Semantic Scholar
+    group: academic
+    url: "https://api.semanticscholar.org/graph/v1/paper/search?query={q}"
+    probe: "https://api.semanticscholar.org/graph/v1/paper/search?query=machine+learning&limit=1"
+    ok_marker: "\"data\""
+    bad_marker: "Too Many Requests"
+    status_proxy: blocked
+    status_cn_direct: shell
+    fallback: openalex
+    intents: [academic]
+    langs: [en]
+    notes: "匿名限流严重（Too Many Requests），配可选 Key 提额"
+
+  - id: pubmed
+    name: PubMed E-utilities
+    group: academic
+    url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={q}&retmode=json"
+    probe: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=cancer&retmode=json&retmax=1"
+    ok_marker: "esearchresult"
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: openalex
+    intents: [academic]
+    langs: [en]
+    notes: "3,600 万医学文献金标准"
+
+  - id: arxiv
+    name: arXiv API
+    group: academic
+    url: "https://export.arxiv.org/api/query?search_query=all:{q}&max_results=10"
+    probe: "https://export.arxiv.org/api/query?search_query=all:transformer&max_results=1"
+    ok_marker: "<entry>"
+    status_proxy: ok
+    status_cn_direct: timeout
+    fallback: openalex
+    intents: [academic]
+    langs: [en]
+    notes: "240 万预印本，返回标准 Atom；必须用 export.arxiv.org 域名"
+
+  - id: biorxiv
+    name: bioRxiv API
+    group: academic
+    url: "https://api.biorxiv.org/details/biorxiv/{q}"
+    probe: "https://api.biorxiv.org/details/biorxiv/10.1101/2024.01.01.573820"
+    ok_marker: "collection"
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: pubmed
+    intents: [academic]
+    langs: [en]
+    notes: "{q} 为 DOI，真实格式 10.1101/YYYY.MM.DD.xxxxx，格式错报 non-numeric value"
+
+  # ---------- 社区信号源 ----------
+  - id: hackernews
+    name: Hacker News (Algolia)
+    group: community
+    url: "https://hn.algolia.com/api/v1/search?query={q}"
+    probe: "https://hn.algolia.com/api/v1/search?query=python&hitsPerPage=1"
+    ok_marker: "\"hits\""
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: github_search
+    intents: [community, tech]
+    langs: [en]
+    notes: "开发者讨论+投票，科技叙事强度；零 Key"
+
+  - id: polymarket
+    name: Polymarket
+    group: community
+    url: "https://gamma-api.polymarket.com/markets?closed=false"
+    probe: "https://gamma-api.polymarket.com/markets?closed=false&limit=1"
+    ok_marker: "question"
+    status_proxy: ok
+    status_cn_direct: timeout
+    fallback: null
+    intents: [community]
+    langs: [en]
+    notes: "预测市场真金白银概率，信号可靠性最高；直连超时"
+
+  - id: github_search
+    name: GitHub Search API
+    group: community
+    url: "https://api.github.com/search/repositories?q={q}&sort=stars"
+    probe: "https://api.github.com/search/repositories?q=python&per_page=1"
+    ok_marker: "total_count"
+    status_proxy: ok
+    status_cn_direct: ok
+    fallback: null
+    intents: [community, tech, restricted_fallback]
+    langs: [any]
+    notes: "star 增速/PR 活跃 = 技术热度；零 Key 限 10 次/分；直连可达"
+
+  - id: reddit
+    name: Reddit
+    group: community
+    url: "https://www.reddit.com/search.json?q={q}"
+    probe: "https://www.reddit.com/search.json?q=python&limit=1"
+    ok_marker: "\"data\""
+    status_proxy: blocked
+    status_cn_direct: timeout
+    fallback: bing_intl
+    intents: [community]
+    langs: [en, zh]
+    notes: "直连与脚本均被 block；替代：site:reddit.com 经 bing_intl/ecosia 定向抓取"
+
+  # ---------- 语义搜索通道（1，MCP 非 web_fetch，v2.9.0 新增） ----------
+  - id: exa
+    name: Exa（神经语义搜索）
+    group: semantic
+    url: "https://mcp.exa.ai/mcp"   # MCP 端点，非 web_fetch 模板；经 web_search_exa / web_fetch_exa（免费层）/ web_search_advanced_exa（需 Key）工具调用
+    probe: "https://mcp.exa.ai/mcp"
+    ok_marker: ""
+    bad_marker: ""
+    manual: true
+    status_proxy: untested
+    status_cn_direct: ok
+    fallback: null
+    intents: [default_zh, default_en, tech, academic, fact]
+    langs: [any]
+    notes: "神经语义搜索（按意义匹配非关键词，描述性查询）。定位：① 层 0 侦查语义探路（用户原话直投，结果标题/摘要暴露行话）；② ⑤.8 语义雪球（URL 作 query 找内容同构但无引用关系的页面）；③ ⑤.5 描述性查询重构（关键词搜不到时改写为语义描述）；④ **JS 重页面盲区补丁**——web_fetch_exa 服务端渲染抓取，实测掘金 SPA 首页 3029 字符真数据（2026-09-05），SearXNG 自建由此降为可选。调用方式：MCP 工具（**非 web_fetch——不参与层 3 常规执行与渠道数计数**）。**2026-08-29 免费层实测**：大陆直连可达（~2s），initialize 握手 exa-search-server v3.2.1（tools/prompts/resources 齐全）；免费层无 Key 仅暴露 **web_search_exa**（语义搜索，参数 query/numResults/type/livecrawl/contextMaxCharacters，返回标题/URL/发布日/Highlights）+ **web_fetch_exa**（URL 抓取，参数 urls 数组）两工具且实测可调；**web_search_advanced_exa（域过滤/时间/category/contents.summary+JSON schema 结构化提取）与 deep_search 需 API Key 解锁**——语义雪球免费层用 web_search_exa 的 query 传 URL 近似替代，结构化提取需 Key 后启用。⚠️ python-urllib 默认 UA 被 Cloudflare 403，裸脚本调 MCP 端点须带浏览器 UA。MCP 端点 GET 探活无意义，selftest 不探活不写回，状态人工实测维护"
+
+  # ---------- 浏览器自动化通道（1，CLI 非 web_fetch，v3.0.0 新增） ----------
+  - id: browser_act
+    name: BrowserAct（浏览器自动化兜底）
+    group: browser
+    executor: browser_act
+    url: "browser-act stealth-extract <url> --content-type html"   # CLI 命令模板，非 URL；完整能力见手册 ⑤.10（open/state/interact/network requests/eval/screenshot/solve-captcha）
+    probe: ""        # CLI 通道无探活 URL；自检用 `browser-act --version` + `browser-act get-skills core`
+    ok_marker: ""
+    bad_marker: ""
+    manual: true
+    status_proxy: untested
+    status_cn_direct: ok
+    fallback: null
+    intents: [default_zh, default_en, tech, academic, news, wechat, community, fact]   # 通用兜底，不进常规路由组
+    langs: [any]
+    notes: "**第二执行范式（v3.0.0 新增，2026-09-19 实测打通）**：本地 CLI + 云浏览器，补 web_fetch 三大死区——① JS 渲染页（web_fetch 丢 img/DOM，实测雁荡山官网 wzyds.com 与温州政务 CMS 的 img src 全量抓到，WebFetch 均拿不到）；② 登录态（cookie 保持，多浏览器账号隔离）；③ 验证码（solve-captcha 自动解 + remote-assist 人工接管兜底）。**定位：层 3 降级链第四级兜底（重试→回声→浏览器兜底→fallback），非常规路径**——云服务有免费配额、单次 10-30s 延迟，web_fetch 通的情况下禁止动用；quick 档禁用。⚠️ 三重前置（缺一即 230331/安装失败）：① WorkBuddy 用户需开启 Allow Full Access；② Python ==3.12.*（embed zip 解压方案，3.13 pip 拒装、官方静默安装器 exit 67 不可靠，见手册 F.4.2）；③ `browser-act auth login`→用户注册→`auth poll` 拿 Key。使用纪律：单任务浏览器调用 ≤3 次、用后必 `session close`、登录态涉隐私需用户显式授权。MCP/CLI 端点 GET 探活无意义，selftest 不探活不写回，状态人工实测维护（2026-09-19 雁荡山官网+温州政务 CMS 双站点实测 ok）"
+
+# ---------- 路由组定义（手册 ② 按组名引用，selftest 不探测本节） ----------
+route_groups:
+  tech: [google_hk, ddg, bing_intl, github_search]
+  academic: [bing_academic, openalex, crossref, arxiv, pubmed, google_scholar]
+  wechat: [weixin, baidu, so360]
+  news: [google_news_rss, google_hk, baidu]
+  default_zh: [baidu, bing_cn, bing_intl, so360, sogou, weixin, sm]
+  default_en: [bing_intl, ecosia, ddg, brave, startpage, yahoo, google_hk]
+  community: [polymarket, hackernews, github_search, reddit]
+  # 大陆直连兜底组：2026-08-13 实测全部直连可用（ecosia 已 301 重定向，剔除出兜底组；yandex/naver/mojeek/yahoo_jp/marginalia/seznam 2026-08-15 直连实测补充出口）
+  restricted_fallback_zh: [baidu, bing_cn, bing_intl, so360, sogou, weixin, sm]
+  restricted_fallback_en: [bing_intl, yandex, naver, mojeek, yahoo_jp, marginalia, seznam, openalex, google_news_rss, github_search, bing_academic]
+  # 语义搜索通道（v2.9.0）：非层 3 web_fetch 执行组（MCP 工具调用），仅层 0 侦查语义探路 / ⑤.8 语义雪球 / ⑤.5 描述性查询重构使用，不计入层 3 渠道数与 ④ 调用分级
+  semantic: [exa]
+
+# 调用分级（手册 ④ 的机器可读版；engines 统一为字符串，deep 允许范围表述）
+tiers:
+  quick: { engines: "3", note: "baidu + bing_intl + ddg；ddg 不可达 → so360（禁止降双引擎，双引擎凑不齐交叉验证最低人数）" }
+  standard: { engines: "6-8", note: "按意图与语言路由" }
+  deep: { engines: "12-16 或当前出口可达上限", note: "全量+学术/垂直；凑不满 12 按可达上限执行并注明" }
